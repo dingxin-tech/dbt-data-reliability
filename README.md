@@ -196,3 +196,54 @@ Check out the [full documentation](https://docs.elementary-data.com/).
 Thank you :orange_heart: Whether it's a bug fix, new feature, or additional documentation - we greatly appreciate contributions!
 
 Check out the [contributions guide](https://docs.elementary-data.com/oss/general/contributions) and [open issues](https://github.com/elementary-data/elementary/issues) in the main repo.
+
+
+## Dependency pinning
+
+`packages.yml` pins **dbt_utils** to one exact hub version:
+
+```yaml
+  - package: dbt-labs/dbt_utils
+    version: 1.4.1
+```
+
+`package-lock.yml` in this directory records what that resolved to:
+
+    dbt_utils -> 1.4.1
+
+Before this change the dependency floated on an open range (`version: [">=0.8.0", "<2.0.0"]`), which the registry resolves to whatever is newest, so two clean `dbt deps` runs on different
+days could install different dbt_utils source, and nothing in the project said which one you got.
+`dbt-labs/dbt_utils` 1.4.1 is the version the MaxCompute run of 2026-09-25 actually installed (data-reliability-master.deps in results3_C.sanitized.json recorded `Installed from version 1.4.1`). This repository has no release tag of its own yet, so consumers pin it by full commit sha.
+
+Check it yourself, in a clean checkout:
+
+```bash
+python dev-tools/check_package_pins.py      # R1-R4: immutable refs, lock in sync, tags unmoved
+rm -rf dbt_packages package-lock.yml && dbt deps && git diff --exit-code package-lock.yml
+```
+
+### Installing this package reproducibly
+
+```yaml
+# your_project/packages.yml
+packages:
+  - git: "https://github.com/dingxin-tech/dbt-data-reliability.git"
+    revision: 9ec0685e6f47ba78b3c1aa574f6ab34c657a904f
+```
+
+Pin commit sha (this repository has no release tag yet) in your own project, then commit the `package-lock.yml` that `dbt deps` writes there: it holds the full commit sha, so a rebuild years from now installs this same code.
+
+```bash
+rm -rf dbt_packages package-lock.yml && dbt deps   # writes a lock holding full commit shas
+dbt deps --lock                                    # later runs install exactly what is locked
+```
+
+### Upgrading a dependency
+
+1. Read the current MaxCompute support level first: the *Compatible dbt Packages* table in the
+   [dbt-maxcompute README](https://github.com/aliyun/dbt-maxcompute).
+2. Change `revision:` (or `version:`) to a tag or a full 40-char commit sha. Never a branch name -
+   `.github/workflows/deps-lock-check.yml` fails on that.
+3. Regenerate from scratch: `rm -rf dbt_packages package-lock.yml && dbt deps`, then
+   `python dev-tools/check_package_pins.py` and a real `dbt build` against a three-tier MaxCompute project.
+4. Commit `packages.yml` and `package-lock.yml` together so a revert is atomic.
